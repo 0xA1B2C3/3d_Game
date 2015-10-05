@@ -20,40 +20,11 @@ double global_decrease = 0.001;
 double global_alpha = 1.0;
 double clearance = 0.0;
 double tele_clock = 0;
-
-double ly = 0.0;
-double angle = 0.0;
-double angled = 0.0;
-double sensitivity = 0.02;
-double walkbias = 0.0;
-double walkbiasangle = 0.0;
-
-double friction = .5;
-double gravity = 1;
-
-double pHead = .2;
-double pLegs = 1.0;
-double pWidth = 0.5;
-
+double heading = 0.0;
+double heading2 = 0.0;
 const double piover180 = 0.0174532925;
 square *temp;
 POINT global_pos;
-
-
-
-//Standalone Utilities
-double dabs(double in) {
-	if (in >= 0)
-		return in;
-	else
-		return (in / -1);
-}
-bool isposorneg(double num) {
-	if (num >= 0)
-		return true;
-	else
-		return false;
-}
 
 //Colors
 void DefineColors() {
@@ -69,9 +40,6 @@ void DefineColors() {
 	white.r = 1.0;
 	white.g = 1.0;
 	white.b = 1.0;
-	gray.r = 100;
-	gray.g = 100;
-	gray.b = 100;
 	return;
 }
 
@@ -79,7 +47,6 @@ void DefineColors() {
 game *CG;
 game g1;
 static cube cl1, cl2;
-static square ground;
 
 //Object List Functions
 void add_obj(void *structure, unsigned int type, objlist *l) {
@@ -213,75 +180,20 @@ void InitCube(cube *input) {
 	input->right.btr.y = -1.0;
 	input->right.btr.z = -1.0;
 }
-void InitSquare(square *input) {
-	input->clr = white;
-	input->tex = 0;
-
-	input->tpl.x = 0.5;
-	input->tpl.y = 1.0;
-	input->tpl.z = -6.0;
-
-	input->tpr.x = 2.5;
-	input->tpr.y = 1.0;
-	input->tpr.z = -6.0;
-
-	input->btr.x = 2.5;
-	input->btr.y = -1.0;
-	input->btr.z = -6.0;
-
-	input->btl.x = 0.5;
-	input->btl.y = -1.0;
-	input->btl.z = -6.0;
-	return;
-}
 
 //Level Building Functions
 void SetupLevel1() {
 	InitCube(&cl1);
 	InitCube(&cl2);
-	InitSquare(&ground);
-
-	//Ground
-	ground.btl = (vertex) {.x = -20, .y = -1.5, .z = -20};
-	ground.btr = (vertex) {.x = 20, .y = -1.5, .z = -20 };
-	ground.tpl = (vertex) {.x = -20, .y = -1.5, .z = 20 };
-	ground.tpr = (vertex) { .x = 20, .y = -1.5, .z = 20 };
-	ground.clr = gray;
-
-	ShiftCube(&cl2, SHFT_RT, 5);
+	ShiftCube(&cl2, SHFT_RT, 1);
 	g1.levs = calloc(1, sizeof(level));
 	InitCamera(&g1.levs[0].cam);
 	add_obj((void *)&cl1, OBJ_CUBE, &g1.levs[0].objlst);
 	add_obj((void *)&cl2, OBJ_CUBE, &g1.levs[0].objlst);
-	add_obj((void *)&ground, OBJ_SQ, &g1.levs[0].objlst);
 	CG->CurLevel = &g1.levs[0];
 }
 
 //Drawing Functions
-void DrawSquare(square input) {
-	if (input.tex != 0) {
-		glEnable(GL_TEXTURE_2D);
-		glBindTexture(GL_TEXTURE_2D, input.tex);
-		glBegin(GL_QUADS);
-		glColor3d(input.clr.r, input.clr.g, input.clr.b);
-		glTexCoord2d(0.0, 0.0); glVertex3d(input.tpl.x, input.tpl.y, input.tpl.z);
-		glTexCoord2d(0.0, 1.0); glVertex3d(input.tpr.x, input.tpr.y, input.tpr.z);
-		glTexCoord2d(1.0, 1.0); glVertex3d(input.btr.x, input.btr.y, input.btr.z);
-		glTexCoord2d(1.0, 0.0); glVertex3d(input.btl.x, input.btl.y, input.btl.z);
-		glEnd();
-		glDisable(GL_TEXTURE_2D);
-	}
-	else {
-		glBegin(GL_QUADS);
-		glColor3d(input.clr.r, input.clr.g, input.clr.b);
-		glVertex3d(input.tpl.x, input.tpl.y, input.tpl.z);
-		glVertex3d(input.tpr.x, input.tpr.y, input.tpr.z);
-		glVertex3d(input.btr.x, input.btr.y, input.btr.z);
-		glVertex3d(input.btl.x, input.btl.y, input.btl.z);
-		glEnd();
-	}
-	return;
-}
 void DrawCube(cube input) {
 	glBegin(GL_QUADS);
 	glColor3d(0.0, 1.0, 0.0);
@@ -323,14 +235,10 @@ void DrawCube(cube input) {
 	return;
 }
 void DrawObj(obj o) {
-	cube *temp; square *temp2;
+	cube *temp;
 	if (o.type == OBJ_CUBE) {
-		temp = (cube *)o.obj;
+		temp = (cube *) o.obj;
 		DrawCube(*temp);
-	}
-	else if (o.type == OBJ_SQ) {
-		temp2 = (square *)o.obj;
-		DrawSquare(*temp2);
 	}
 }
 void DrawLevel(level l) {
@@ -394,28 +302,25 @@ void ShiftCube(cube *input, int direction, double amount) {
 	ShiftSq(&input->right, direction, amount);
 	return;
 }
-void Bounce(unsigned int direction, double amount) {
-	if ((walkbiasangle <= 1.0) && (direction == DIR_UP)) {
-		walkbiasangle = 359.0;
-		walkbias = sin(walkbiasangle * piover180 / 30) / 20.0;
-		return;
-	}
-	else if ((walkbiasangle >= 359.0) && (direction == DIR_DOWN)) {
-		walkbiasangle = 0.0f;
-		walkbias = sin(walkbiasangle * piover180 / 30) / 20.0;
-		return;
-	}
-
-	if (direction == DIR_DOWN) {
-		walkbiasangle -= amount;
-	} 
-	else if (direction == DIR_UP) {
-		walkbiasangle += amount;
-	}
-	walkbias = sin(walkbiasangle * piover180 / 30) / 20.0;     
-}
 
 //Camera Movement
+/*void MoveCamera(int direction, double amount) {
+	switch (direction) {
+	case SHFT_RT:
+		CG->CurLevel->cam.rotx += amount;
+		break;
+	case SHFT_LEFT:
+		CG->CurLevel->cam.rotx -= amount;
+		break;
+	case SHFT_UP:
+		CG->CurLevel->cam.roty += amount;
+		break;
+	case SHFT_DOWN:
+		CG->CurLevel->cam.roty -= amount;
+		break;
+	}
+	return;
+}*/
 void CheckCamRot() {
 	glRotated(CG->CurLevel->cam.rotwrldx, 1.0, 0.0, 0.0);
 	glRotated(CG->CurLevel->cam.rotwrldy, 0.0, 1.0, 0.0);
@@ -423,130 +328,84 @@ void CheckCamRot() {
 }
 void MoveCam(int direction, double amount) {
 	if (direction == SHFT_LEFT) {
-		CG->CurLevel->cam.poswrldx += cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldz -= sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_UP, 40);
+		CG->CurLevel->cam.posx -= amount;
+		heading -= amount;
 	}
 	if (direction == SHFT_RT) {
-		CG->CurLevel->cam.poswrldx -= cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldz += sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_DOWN, 40);
+		CG->CurLevel->cam.posx += amount;
+		heading += amount;
 	}
 	if (direction == SHFT_FORWARD) {
-		CG->CurLevel->cam.poswrldz += cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldx += sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_UP, 40);
+		CG->CurLevel->cam.posy += (float)sin(heading*piover180) * 0.05f;
+		CG->CurLevel->cam.posx += (float)sin(heading*piover180) * 0.05f;
 	}
 	if (direction == SHFT_BACK) {
-		CG->CurLevel->cam.poswrldz -= cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldx -= sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_DOWN, 40);
+		CG->CurLevel->cam.posx -= (float)sin(heading*piover180) * 0.05f;
+		CG->CurLevel->cam.posy -= (float)sin(heading*piover180) * 0.05f;
 	}
-
-	if (direction == SHFT_DOWN) 
-		CG->CurLevel->cam.posy -= amount;
-	if (direction == SHFT_UP)
-		CG->CurLevel->cam.posy += amount;
-}
-
-//Collisions
-bool ChkCamColl() {
-	int i; cube hitbox; camera *cam = &CG->CurLevel->cam;
-	cube *temp;
-
-	hitbox.top.tpl = (vertex){ .x = cam->posx + cam->poswrldx + pWidth, .z = cam->poswrldz + cam->posz + pWidth, .y = cam->posy + pHead};
-	hitbox.top.tpr = (vertex){ .x = cam->posx + cam->poswrldx - pWidth, .z = cam->poswrldz + cam->posz + pWidth, .y = cam->posy + pHead};
-	hitbox.top.btl = (vertex){ .x = cam->posx + cam->poswrldx + pWidth, .z = cam->poswrldz + cam->posz - pWidth, .y = cam->posy + pHead};
-	hitbox.top.btr = (vertex){ .x = cam->posx + cam->poswrldx - pWidth, .z = cam->poswrldz + cam->posz - pWidth, .y = cam->posy + pHead};
-	hitbox.bt.tpl  = (vertex){ .x = cam->posx + cam->poswrldx + pWidth, .z = cam->poswrldz + cam->posz + pWidth, .y = cam->posy - pLegs};
-
-	for (i = 0; i < CG->CurLevel->objlst.i; i++) { //Main Iterator
-		if (CG->CurLevel->objlst.obj[i].type == OBJ_CUBE) {//For Cubes
-			temp = (cube *)CG->CurLevel->objlst.obj[i].obj;
-			//Bound Checking (for small->big)
-			if (((temp->top.tpl.x > hitbox.top.tpl.x) && (temp->top.tpr.x < hitbox.top.tpl.x)) || //X Axis 1
-				((temp->top.tpr.x < hitbox.top.tpr.x) && (temp->top.tpl.x > hitbox.top.tpr.x))) { //X Axis 2
-				if (((temp->top.tpl.z > hitbox.top.tpl.z) && (temp->top.btl.z < hitbox.top.tpl.z)) ||  //Z Axis 1
-					((temp->top.btl.z < hitbox.top.btl.z) && (temp->top.tpl.z > hitbox.top.btl.z))) {  //Z Axis 2
-					if (((temp->bt.tpl.y < hitbox.top.tpl.y) && (temp->top.tpr.y > hitbox.top.tpl.y)) || //Y Axis 1
-						((temp->top.tpr.y > hitbox.bt.tpr.y) && (temp->bt.tpl.y < hitbox.bt.tpr.y))) {   //Y Axis 2
-						return false;
-					}
-				}
-			}
-			//big->small
-			if (((hitbox.top.tpl.x > temp->top.tpl.x) && (hitbox.top.tpl.x < temp->top.tpr.x)) || //X Axis 1
-				((hitbox.top.tpr.x < temp->top.tpr.x) && (hitbox.top.tpr.x > temp->top.tpl.x))) { //X Axis 2
-				if (((hitbox.top.tpl.z > temp->top.tpl.z) && (hitbox.top.tpl.z < temp->top.btl.z)) ||  //Z Axis 1
-					((hitbox.top.btl.z < temp->top.btl.z) && (hitbox.top.btl.z > temp->top.tpl.z))) {  //Z Axis 2
-					if (((hitbox.top.tpl.y < temp->bt.tpl.y) && (hitbox.top.tpl.y > temp->top.tpr.y)) || //Y Axis 1
-						((hitbox.bt.tpr.y > temp->top.tpr.y) && (hitbox.bt.tpr.y < temp->bt.tpl.y))) {   //Y Axis 2
-						return false;
-					}
-				}
-			}
-		}
-	}
-	return true;
 }
 
 //Updates
 void UpdateKeyStates() {
 	//Move Camera
 	if (GetAsyncKeyState('W')) {
-		CG->CurLevel->cam.poswrldz += cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldx += sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_UP, 40);
+		CG->CurLevel->cam.poswrldz += cos(heading*piover180) * 0.03f;
+		CG->CurLevel->cam.poswrldx += sin(heading*piover180) * 0.03f;
 	}
 	if (GetAsyncKeyState('S')) {
-		CG->CurLevel->cam.poswrldz -= cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldx -= sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_DOWN, 40);
+		CG->CurLevel->cam.poswrldz -= cos(heading*piover180) * 0.03f;
+		CG->CurLevel->cam.poswrldx -= sin(heading*piover180) * 0.03f;
 	}
 	if (GetAsyncKeyState('D')) {
-		CG->CurLevel->cam.poswrldx -= cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldz += sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_DOWN, 40);
+		CG->CurLevel->cam.poswrldx -= cos(heading*piover180) * 0.03f;
+		CG->CurLevel->cam.poswrldz += sin(heading*piover180) * 0.03f;
 	}
 	if (GetAsyncKeyState('A')) {
-		CG->CurLevel->cam.poswrldx += cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldz -= sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_UP, 40);
-	}
-	if (GetAsyncKeyState(VK_SPACE)) {
-		CG->CurLevel->cam.phys.yacc += .5;
+		CG->CurLevel->cam.poswrldx += cos(heading*piover180) * 0.03f;
+		CG->CurLevel->cam.poswrldz -= sin(heading*piover180) * 0.03f;
 	}
 	//Mouse Movement
 	GetCursorPos(&global_pos);
 	if ((global_pos.x != global_x / 2) || (global_pos.y != global_y / 2)) {
 		if (global_pos.x > global_x / 2) {//Right?
-			CG->CurLevel->cam.rotwrldy += (global_x / 2 - global_pos.x) * sensitivity;
+			heading += (global_x / 2 - global_pos.x) * 0.02;
 			//heading -= .5;
 		}
 		if (global_pos.x < global_x / 2) {//Left?
-			CG->CurLevel->cam.rotwrldy += (global_x / 2 - global_pos.x) * sensitivity;
+			heading += (global_x / 2 - global_pos.x) * 0.02;
 			//heading += .5;
 		}
 
-		if (CG->CurLevel->cam.rotwrldy > 360)
-			CG->CurLevel->cam.rotwrldy = 0 + (CG->CurLevel->cam.rotwrldy - 360);
-		if (CG->CurLevel->cam.rotwrldy < 0)
-			CG->CurLevel->cam.rotwrldy = 360 + CG->CurLevel->cam.rotwrldy;
+		if (heading > 360)
+			heading = 0 + (heading - 360);
+		if (heading < 0)
+			heading = 360 + heading;
 
-		if (global_pos.y < global_y / 2)  {//Up?
-			angled = (global_y / 2 - global_pos.y) * sensitivity * .05;
-			if (angle + angled < 1) {
-				ly = sin(angle + angled);
-				angle += angled;
-			}
-		}
-		if (global_pos.y > global_y / 2) {//Down?
-			angled = (global_y / 2 - global_pos.y) * sensitivity * .05;
-			if (angle + angled > -1) {
-				ly = sin(angle + angled);
-				angle += angled;
-			}
-		}
+		if (global_pos.y < global_y / 2) //Up?
+			//CG->CurLevel->cam.rotwrldx -= (global_x / 2 - global_pos.x) * 0.01;
+			if (heading2 < 90.0)
+				heading2 -= (global_y / 2 - global_pos.y) * 0.02;
+				//heading2 += .5;
+		if (global_pos.y > global_y / 2) //Down?
+			//CG->CurLevel->cam.rotwrldx += (global_x / 2 - global_pos.x) * 0.01;
+			if (heading2 > -90.0)
+				//heading2 -= .5;
+				heading2 -= (global_y / 2 - global_pos.y) * 0.02;
+
+		if (heading2 > 280)
+			heading2 = 0 + (heading2 - 360);
+		if (heading2 < -90)
+			heading2 = 280 + heading2;
+
+		/*if (CG->CurLevel->cam.roty > 360.0)
+			CG->CurLevel->cam.roty = 0.0;
+		if (CG->CurLevel->cam.roty < 0.0)
+			CG->CurLevel->cam.roty = 360.0;
+
+		if (CG->CurLevel->cam.rotx > 360.0)
+			CG->CurLevel->cam.rotx = 0.0;
+		if (CG->CurLevel->cam.rotx < 0.0)
+			CG->CurLevel->cam.rotx = 360.0;*/
 
 		if (!GetAsyncKeyState('Z'))
 			SetCursorPos(global_x / 2, global_y / 2);
@@ -554,78 +413,25 @@ void UpdateKeyStates() {
 			Sleep(1);
 	}
 }
-void UpdatePhysics(double dtime) {
-	//-----Camera Physics-----
-	// X Axis
-	if (CG->CurLevel->cam.phys.xacc != 0) {
-		CG->CurLevel->cam.phys.xvel += CG->CurLevel->cam.phys.xacc * dtime; //Vel = Acc * Time
-		if (CG->CurLevel->cam.phys.xacc > 0) { //Friction
-			CG->CurLevel->cam.phys.xacc -= friction * dtime;
-			if (CG->CurLevel->cam.phys.xacc < 0)
-				CG->CurLevel->cam.phys.xacc = 0.0;
-		}
-		else if (CG->CurLevel->cam.phys.xacc < 0) {
-			CG->CurLevel->cam.phys.xacc += friction * dtime;
-			if (CG->CurLevel->cam.phys.xacc > 0)
-				CG->CurLevel->cam.phys.xacc = 0.0;
-		}
-	}
-	// Z Axis
-	if (CG->CurLevel->cam.phys.zacc != 0) {
-		CG->CurLevel->cam.phys.zvel += CG->CurLevel->cam.phys.zacc * dtime; //Vel = Acc * Time
-		if (CG->CurLevel->cam.phys.zacc > 0) { //Friction
-			CG->CurLevel->cam.phys.zacc -= friction * dtime;
-			if (CG->CurLevel->cam.phys.zacc < 0)
-				CG->CurLevel->cam.phys.zacc = 0.0;
-		}
-		else if (CG->CurLevel->cam.phys.zacc < 0) {
-			CG->CurLevel->cam.phys.zacc += friction * dtime;
-			if (CG->CurLevel->cam.phys.zacc > 0)
-				CG->CurLevel->cam.phys.zacc = 0.0;
-		}
-	}
-	// Y Axis
-	if (CG->CurLevel->cam.phys.yacc != 0) {
-		CG->CurLevel->cam.phys.yvel += CG->CurLevel->cam.phys.yacc * dtime; //Vel = Acc * Time
-		if (CG->CurLevel->cam.phys.yacc > 0) { //Friction
-			CG->CurLevel->cam.phys.yacc -= gravity * dtime;
-			if (CG->CurLevel->cam.phys.yacc < 0)
-				CG->CurLevel->cam.phys.yacc = 0.0;
-		}
-		else if (CG->CurLevel->cam.phys.yacc < 0) {
-			CG->CurLevel->cam.phys.yacc += gravity * dtime;
-			if (CG->CurLevel->cam.phys.yacc > 0)
-				CG->CurLevel->cam.phys.yacc = 0.0;
-		}
-	}
-	// Moving
-
-}
-void UpdateAll(double dtime) {
-	UpdateKeyStates();
-	UpdatePhysics(dtime);
-}
 
 //Template
 LRESULT	CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
 int DrawGLScene(GLvoid)									// Here's Where We Do All The Drawing
 {
-	CG->CurLevel->cam.poswrldy = -walkbias - 0.25f;
-
 	if (GetAsyncKeyState('V'))
 		Sleep(1);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);	// Clear Screen And Depth Buffer
 	glLoadIdentity();									// Reset The Current Modelview Matrix
-	gluLookAt(CG->CurLevel->cam.posx, CG->CurLevel->cam.posy, CG->CurLevel->cam.posz, CG->CurLevel->cam.rotx, CG->CurLevel->cam.roty + ly, CG->CurLevel->cam.rotz, CG->CurLevel->cam.vecx, CG->CurLevel->cam.vecy, CG->CurLevel->cam.vecz);
+	gluLookAt(CG->CurLevel->cam.posx, CG->CurLevel->cam.posy, CG->CurLevel->cam.posz, CG->CurLevel->cam.rotx, CG->CurLevel->cam.roty, CG->CurLevel->cam.rotz, CG->CurLevel->cam.vecx, CG->CurLevel->cam.vecy, CG->CurLevel->cam.vecz);
+	//CheckCamRot();
 
-	glRotated(360 - CG->CurLevel->cam.rotwrldy, 0.0, 1.0, 0.0);
-	//glRotated(CG->CurLevel->cam.rotwrldx, 1.0, 0.0, 0.0);
+	//glRotated(360 - heading, 0.0, 1.0, 0.0);
+	//glRotated(heading2, 1.0, 0.0, 0.0);
 	if (GetAsyncKeyState('T'))
-		CG->CurLevel->cam.rotwrldx += .5;
+		heading2 += .5;
+	//glTranslated(CG->CurLevel->cam.poswrldx, CG->CurLevel->cam.poswrldy, CG->CurLevel->cam.poswrldz);
 
-	glTranslated(CG->CurLevel->cam.poswrldx, CG->CurLevel->cam.poswrldy, CG->CurLevel->cam.poswrldz);
-	glTranslated(1.5, 0.0, -7.0);
-
+	glTranslatef(1.5f, 0.0f, -7.0f);
 	DrawLevel(*CG->CurLevel);
 	//ShowFullTexFade(CG->global_tex, &global_alpha, global_decrease);
 
@@ -916,7 +722,7 @@ LRESULT CALLBACK WndProc(HWND	hWnd,			// Handle For This Window
 	{
 		if (wParam == 'C') {
 			if (!(lParam & (1 << 30))) {
-				CG->CurLevel->cam.rotwrldx += 45;
+				heading2 += 45;
 			}
 		}
 	}
@@ -986,7 +792,7 @@ int WINAPI WinMain(HINSTANCE	hInstance,			// Instance
 		CurrentTime /= CLOCKS_PER_SEC;
 		elapsed = CurrentTime - lastTime;
 
-		UpdateAll(elapsed);
+		UpdateKeyStates();
 
 		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))	// Is There A Message Waiting?
 		{

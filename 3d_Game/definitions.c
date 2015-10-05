@@ -39,6 +39,7 @@
 #define OBJ_PYRAMID 2
 #define OBJ_SQ 3
 
+
 //Basic Structs
 typedef struct vertex {
 	double x;
@@ -74,6 +75,8 @@ typedef struct camera {
 	double poswrldx;
 	double poswrldy;
 	double poswrldz;
+	//Physics
+	physics phys;
 } camera;
 typedef struct obj {
 	void *obj;
@@ -91,10 +94,14 @@ typedef struct tex {
 
 //Advanced Structs / Union
 typedef struct square {
+	//Essential
 	vertex btl;
 	vertex btr;
 	vertex tpl;
 	vertex tpr;
+	//Fancy
+	color clr;
+	GLuint tex;
 } square;
 typedef struct cube  {
 	square top;
@@ -124,5 +131,7 @@ typedef struct game {
 } game;
 
 //Colors
-color red, green, blue, white;
+color red, green, blue, white, gray;
 
+//Declarations
+void ShiftCube(cube *input, int direction, double amount);
