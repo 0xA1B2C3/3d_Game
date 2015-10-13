@@ -18,7 +18,6 @@ int mouse_x = 0, mouse_y = 0, i = 0;
 int main_clock;
 double global_decrease = 0.001;
 double global_alpha = 1.0;
-double clearance = 0.0;
 double tele_clock = 0;
 
 double ly = 0.0;
@@ -27,13 +26,17 @@ double angled = 0.0;
 double sensitivity = 0.02;
 double walkbias = 0.0;
 double walkbiasangle = 0.0;
+int iter = 0;
+
+vertex clearance = {.x = 0.0, .y = 0.0, .z = 0.0};
 
 double friction = .5;
 double gravity = 1;
 
-double pHead = .2;
-double pLegs = 1.0;
-double pWidth = 0.5;
+cube hitbox;
+double globtranx = 1.5, globtranz = -7.0;
+
+bool bounce = false;
 
 const double piover180 = 0.0174532925;
 square *temp;
@@ -53,6 +56,46 @@ bool isposorneg(double num) {
 		return true;
 	else
 		return false;
+}
+cube sqstocube(square a, square b) {
+	cube out;
+	out.top = a;
+	out.bt = b;
+
+	out.front.tpl = a.btl;
+	out.front.tpr = a.btr;
+	out.front.btl = b.btl;
+	out.front.btr = b.btr;
+
+	out.back.tpl = a.tpl;
+	out.back.tpr = a.tpr;
+	out.back.btl = b.tpl;
+	out.back.btr = b.tpr;
+
+	out.left.tpl = a.tpl;
+	out.left.tpr = a.btl;
+	out.left.btl = b.tpl;
+	out.left.btr = b.btl;
+
+	out.right.tpl = a.tpr;
+	out.right.tpr = a.btr;
+	out.right.btl = b.tpr;
+	out.right.btr = b.btr;
+
+	return out;
+}
+cube pttosqs(vertex a, double r) {
+	cube out;
+	out.top.tpl = (vertex){ .x = a.x + r, .z = a.z + r, .y = a.y + r };
+	out.top.tpr = (vertex){ .x = a.x - r, .z = a.z + r, .y = a.y + r };
+	out.top.btl = (vertex){ .x = a.x + r, .z = a.z - r, .y = a.y + r };
+	out.top.btr = (vertex){ .x = a.x - r, .z = a.z - r, .y = a.y + r };
+
+	out.bt.tpl  = (vertex){ .x = a.x + r, .z = a.z + r, .y = a.y - r };
+	out.bt.tpr  = (vertex){ .x = a.x - r, .z = a.z + r, .y = a.y - r };
+	out.bt.btl  = (vertex){ .x = a.x + r, .z = a.z - r, .y = a.y - r };
+	out.bt.btr  = (vertex){ .x = a.x - r, .z = a.z - r, .y = a.y - r };
+	return out;
 }
 
 //Colors
@@ -75,12 +118,75 @@ void DefineColors() {
 	return;
 }
 
+//Fonts
+GLvoid BuildFont(GLvoid)								// Build Our Bitmap Font
+{
+	HFONT	font;										// Windows Font ID
+
+	base = glGenLists(256);								// Storage For 256 Characters
+
+	font = CreateFont(-12,							// Height Of Font
+		0,								// Width Of Font
+		0,								// Angle Of Escapement
+		0,								// Orientation Angle
+		FW_BOLD,						// Font Weight
+		FALSE,							// Italic
+		FALSE,							// Underline
+		FALSE,							// Strikeout
+		ANSI_CHARSET,					// Character Set Identifier
+		OUT_TT_PRECIS,					// Output Precision
+		CLIP_DEFAULT_PRECIS,			// Clipping Precision
+		ANTIALIASED_QUALITY,			// Output Quality
+		FF_DONTCARE | DEFAULT_PITCH,		// Family And Pitch
+		L"Comic Sans MS");				// Font Name
+
+	SelectObject(hDC, font);							// Selects The Font We Created
+
+	wglUseFontOutlines(hDC,							// Select The Current DC
+		0,								// Starting Character
+		255,							// Number Of Display Lists To Build
+		base,							// Starting Display Lists
+		0.0f,							// Deviation From The True Outlines
+		0.2f,							// Font Thickness In The Z Direction
+		WGL_FONT_POLYGONS,				// Use Polygons, Not Lines
+		gmf);							// Address Of Buffer To Recieve Data
+}
+GLvoid KillFont(GLvoid)									// Delete The Font
+{
+	glDeleteLists(base, 256);								// Delete All 256 Characters
+}
+GLvoid glPrint(const char *fmt, ...)					// Custom GL "Print" Routine
+{
+	float		length = 0;								// Used To Find The Length Of The Text
+	char		text[256];								// Holds Our String
+	va_list		ap;										// Pointer To List Of Arguments
+
+	if (fmt == NULL)									// If There's No Text
+		return;											// Do Nothing
+
+	va_start(ap, fmt);									// Parses The String For Variables
+	vsprintf(text, fmt, ap);						// And Converts Symbols To Actual Numbers
+	va_end(ap);											// Results Are Stored In Text
+
+	for (unsigned int loop = 0; loop<(strlen(text)); loop++)	// Loop To Find Text Length
+	{
+		length += gmf[text[loop]].gmfCellIncX;			// Increase Length By Each Characters Width
+	}
+
+	glTranslatef(-length / 2, 0.0f, 0.0f);					// Center Our Text On The Screen
+
+	glPushAttrib(GL_LIST_BIT);							// Pushes The Display List Bits
+	glListBase(base);									// Sets The Base Character to 0
+	glCallLists(strlen(text), GL_UNSIGNED_BYTE, text);	// Draws The Display List Text
+	glPopAttrib();										// Pops The Display List Bits
+}
+
 //Globals
 game *CG;
 game g1;
-static cube cl1, cl2;
-static square ground;
-
+static cube cl1, cl2, ground;
+static text t1;
+objlist screen = {.i = 0};
 //Object List Functions
 void add_obj(void *structure, unsigned int type, objlist *l) {
 	//Reallocate if neccessary
@@ -96,6 +202,7 @@ void add_obj(void *structure, unsigned int type, objlist *l) {
 	//Define and Increment
 	l->obj[l->i].obj = structure;
 	l->obj[l->i].type = type;
+	l->obj[l->i].screen = false;
 	l->i++; l->current += sizeof(obj);
 }
 
@@ -234,26 +341,60 @@ void InitSquare(square *input) {
 	input->btl.z = -6.0;
 	return;
 }
+void InitText(text *input) {
+	input->pos.x = 0.0;
+	input->pos.y = 0.0;
+	input->pos.z = 0.0;
+
+	input->rot.x = 0.0;
+	input->rot.y = 0.0;
+	input->pos.z = 0.0;
+
+	input->str = "Default";
+}
+
+//Setups
+void SetupHitBox() {
+	vertex vcam;
+	vcam = (vertex){ .x = CG->CurLevel->cam.posx - 1.5, .z = CG->CurLevel->cam.posz + 7, .y = CG->CurLevel->cam.posy - .4};
+
+	InitCube(&hitbox);
+	hitbox = pttosqs(vcam, 1);
+	hitbox = sqstocube(hitbox.top, hitbox.bt);
+}
 
 //Level Building Functions
 void SetupLevel1() {
 	InitCube(&cl1);
 	InitCube(&cl2);
-	InitSquare(&ground);
+	InitCube(&ground);
+	InitText(&t1);
 
 	//Ground
-	ground.btl = (vertex) {.x = -20, .y = -1.5, .z = -20};
-	ground.btr = (vertex) {.x = 20, .y = -1.5, .z = -20 };
-	ground.tpl = (vertex) {.x = -20, .y = -1.5, .z = 20 };
-	ground.tpr = (vertex) { .x = 20, .y = -1.5, .z = 20 };
-	ground.clr = gray;
+	ground.top.btl = (vertex) {.x = -20, .y = -1.5, .z = -20};
+	ground.top.btr = (vertex) {.x = 20, .y = -1.5, .z = -20 };
+	ground.top.tpl = (vertex) {.x = -20, .y = -1.5, .z = 20 };
+	ground.top.tpr = (vertex) { .x = 20, .y = -1.5, .z = 20 };
+	ground.bt = ground.top;
+	SlideSq(&ground.bt, AXIS_Y, -.5);
+	ground = sqstocube(ground.top, ground.bt);
+	ground.top.clr = gray;
+	
+	//Text
+	t1.str = calloc(200, 1);
+	strcpy(t1.str, "Hello");
+	t1.pos.z = -3.0;
 
 	ShiftCube(&cl2, SHFT_RT, 5);
 	g1.levs = calloc(1, sizeof(level));
 	InitCamera(&g1.levs[0].cam);
 	add_obj((void *)&cl1, OBJ_CUBE, &g1.levs[0].objlst);
 	add_obj((void *)&cl2, OBJ_CUBE, &g1.levs[0].objlst);
-	add_obj((void *)&ground, OBJ_SQ, &g1.levs[0].objlst);
+	add_obj((void *)&ground, OBJ_CUBE, &g1.levs[0].objlst);
+	//add_obj((void *)&t1, OBJ_TEXT, &g1.levs[0].objlst);
+	add_obj((void *)&t1, OBJ_TEXT, &screen);
+	screen.obj[0].screen = true;
+	//add_obj((void *)&hitbox, OBJ_CUBE, &g1.levs[0].objlst);
 	CG->CurLevel = &g1.levs[0];
 }
 
@@ -322,8 +463,30 @@ void DrawCube(cube input) {
 	glEnd();
 	return;
 }
+void DrawTextStruct(text input, bool screen) {
+	double x, y, z;
+	if (screen) {
+		x = -(CG->CurLevel->cam.poswrldx + CG->CurLevel->cam.posx + globtranx);
+		y = -CG->CurLevel->cam.posy;
+		z = -(CG->CurLevel->cam.poswrldz + CG->CurLevel->cam.posz + globtranz);
+
+		glTranslated(x, y, z);
+		glRotated(input.rot.x, 1.0, 0.0, 0.0);
+		glRotated(input.rot.y, 0.0, 1.0, 0.0);
+		glRotated(input.rot.z, 0.0, 0.0, 1.0);
+		glTranslated(input.pos.x - x, input.pos.y - y, input.pos.z - z);
+		glPrint(input.str);
+	}
+	else {
+		glTranslated(input.pos.x, input.pos.y, input.pos.z);
+		glRotated(input.rot.x, 1.0, 0.0, 0.0);
+		glRotated(input.rot.y, 0.0, 1.0, 0.0);
+		glRotated(input.rot.z, 0.0, 0.0, 1.0);
+		glPrint(input.str);
+	}
+}
 void DrawObj(obj o) {
-	cube *temp; square *temp2;
+	cube *temp; square *temp2; text *temp3;
 	if (o.type == OBJ_CUBE) {
 		temp = (cube *)o.obj;
 		DrawCube(*temp);
@@ -332,15 +495,56 @@ void DrawObj(obj o) {
 		temp2 = (square *)o.obj;
 		DrawSquare(*temp2);
 	}
+	else if (o.type == OBJ_TEXT) {
+		temp3 = (text *)o.obj;
+		DrawTextStruct(*temp3, o.screen);
+	}
+}
+void DrawScreen() {
+	int i;
+	for (i = 0; i < screen.i; i++) {
+		DrawObj(screen.obj[i]);
+	}
 }
 void DrawLevel(level l) {
 	int i;
 	for (i = 0; i < l.objlst.i; i++) {
 		DrawObj(l.objlst.obj[i]);
 	}
+	DrawScreen();
 }
 
 //Moving Functions
+void SlideSq(square *input, int axis, double amount) {
+	switch (axis) {
+	case AXIS_X:
+		input->btl.x += amount;
+		input->tpl.x += amount;
+		input->tpr.x += amount;
+		input->btr.x += amount;
+		break;
+	case AXIS_Y:
+		input->btl.y += amount;
+		input->tpl.y += amount;
+		input->tpr.y += amount;
+		input->btr.y += amount;
+		break;
+	case AXIS_Z:
+		input->btl.z += amount;
+		input->tpl.z += amount;
+		input->tpr.z += amount;
+		input->btr.z += amount;
+		break;
+	}
+}
+void SlideCube(cube *input, int axis, double amount) {
+	SlideSq(&input->top, axis, amount);
+	SlideSq(&input->back, axis, amount);
+	SlideSq(&input->bt, axis, amount);
+	SlideSq(&input->front, axis, amount);
+	SlideSq(&input->left, axis, amount);
+	SlideSq(&input->right, axis, amount);
+}
 void ShiftSq(square *input, int direction, double amount) {
 	switch (direction) {
 
@@ -394,25 +598,25 @@ void ShiftCube(cube *input, int direction, double amount) {
 	ShiftSq(&input->right, direction, amount);
 	return;
 }
-void Bounce(unsigned int direction, double amount) {
+void Bounce(unsigned int direction, double amplitude, double frequency) {
 	if ((walkbiasangle <= 1.0) && (direction == DIR_UP)) {
 		walkbiasangle = 359.0;
-		walkbias = sin(walkbiasangle * piover180 / 30) / 20.0;
+		walkbias = sin(walkbiasangle * piover180 * amplitude) / frequency;
 		return;
 	}
 	else if ((walkbiasangle >= 359.0) && (direction == DIR_DOWN)) {
 		walkbiasangle = 0.0f;
-		walkbias = sin(walkbiasangle * piover180 / 30) / 20.0;
+		walkbias = sin(walkbiasangle * piover180 * amplitude) / frequency;
 		return;
 	}
 
 	if (direction == DIR_DOWN) {
-		walkbiasangle -= amount;
+		walkbiasangle -= 1;
 	} 
 	else if (direction == DIR_UP) {
-		walkbiasangle += amount;
+		walkbiasangle += 1;
 	}
-	walkbias = sin(walkbiasangle * piover180 / 30) / 20.0;     
+	walkbias = sin(walkbiasangle * piover180 * amplitude) / frequency;     
 }
 
 //Camera Movement
@@ -422,55 +626,135 @@ void CheckCamRot() {
 	glRotated(CG->CurLevel->cam.rotwrldz, 0.0, 0.0, 1.0);
 }
 void MoveCam(int direction, double amount) {
+	/*bounce[0] = GetAsyncKeyState('A'); 
+	bounce[1] = GetAsyncKeyState('D'); 
+	bounce[2] = GetAsyncKeyState('W');
+	bounce[3] = GetAsyncKeyState('S');*/
+
 	if (direction == SHFT_LEFT) {
-		CG->CurLevel->cam.poswrldx += cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldz -= sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_UP, 40);
+		SlideCube(&hitbox, AXIS_X, -cos(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		if (!ChkCamColl())
+			SlideCube(&hitbox, AXIS_X, cos(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		else {
+			CG->CurLevel->cam.poswrldx += cos(CG->CurLevel->cam.rotwrldy*piover180) * amount;
+			UpdateScreen(AXIS_X, -cos(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+
+		SlideCube(&hitbox, AXIS_Z, sin(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		if (!ChkCamColl()) {
+			SlideCube(&hitbox, AXIS_Z, -sin(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		} 
+		else {
+			CG->CurLevel->cam.poswrldz -= sin(CG->CurLevel->cam.rotwrldy*piover180) * amount;
+			UpdateScreen(AXIS_Z, sin(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+		//Bounce(DIR_UP, .4, 2);
 	}
 	if (direction == SHFT_RT) {
-		CG->CurLevel->cam.poswrldx -= cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldz += sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_DOWN, 40);
+		SlideCube(&hitbox, AXIS_X, cos(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		if (!ChkCamColl()) {
+			SlideCube(&hitbox, AXIS_X, -cos(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+		else {
+			CG->CurLevel->cam.poswrldx -= cos(CG->CurLevel->cam.rotwrldy*piover180) * amount;
+			UpdateScreen(AXIS_X, cos(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+
+		SlideCube(&hitbox, AXIS_Z, -sin(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		if (!ChkCamColl()) {
+			SlideCube(&hitbox, AXIS_Z, sin(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+		else {
+			CG->CurLevel->cam.poswrldz += sin(CG->CurLevel->cam.rotwrldy*piover180) * amount;
+			UpdateScreen(AXIS_Z, -sin(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+		//Bounce(DIR_DOWN, .4, 2);
 	}
 	if (direction == SHFT_FORWARD) {
-		CG->CurLevel->cam.poswrldz += cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldx += sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_UP, 40);
+		SlideCube(&hitbox, AXIS_Z, -cos(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		if (!ChkCamColl()) {
+			SlideCube(&hitbox, AXIS_Z, cos(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+		else {
+			CG->CurLevel->cam.poswrldz += cos(CG->CurLevel->cam.rotwrldy*piover180) * amount;
+			UpdateScreen(AXIS_Z, -cos(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+
+		SlideCube(&hitbox, AXIS_X, -sin(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		if (!ChkCamColl()) {
+			SlideCube(&hitbox, AXIS_X, sin(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+		else {
+			CG->CurLevel->cam.poswrldx += sin(CG->CurLevel->cam.rotwrldy*piover180) * amount;
+			UpdateScreen(AXIS_X, -sin(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+		//if (!(bounce[0] || bounce[1])) {
+			//Bounce(DIR_UP, .4, 2);
+		//}
 	}
 	if (direction == SHFT_BACK) {
-		CG->CurLevel->cam.poswrldz -= cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldx -= sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_DOWN, 40);
+		SlideCube(&hitbox, AXIS_Z, cos(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		if (!ChkCamColl()) {
+			SlideCube(&hitbox, AXIS_Z, -cos(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+		else {
+			CG->CurLevel->cam.poswrldz -= cos(CG->CurLevel->cam.rotwrldy*piover180) * amount;
+			UpdateScreen(AXIS_Z, cos(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+
+		SlideCube(&hitbox, AXIS_X, sin(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		if (!ChkCamColl()) {
+			SlideCube(&hitbox, AXIS_X, -sin(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+		else {
+			CG->CurLevel->cam.poswrldx -= sin(CG->CurLevel->cam.rotwrldy*piover180) * amount;
+			UpdateScreen(AXIS_X, sin(CG->CurLevel->cam.rotwrldy*piover180) * amount);
+		}
+		//if (!(bounce[0] || bounce[1])) {
+			//Bounce(DIR_DOWN, .4, 2);
+		//}
 	}
 
-	if (direction == SHFT_DOWN) 
-		CG->CurLevel->cam.posy -= amount;
-	if (direction == SHFT_UP)
-		CG->CurLevel->cam.posy += amount;
+	if (direction == SHFT_DOWN) {
+		SlideCube(&hitbox, AXIS_Y, amount);
+		if (!ChkCamColl()) {
+			SlideCube(&hitbox, AXIS_Y, -amount);
+		}
+		else {
+			CG->CurLevel->cam.posy -= amount;
+		}
+	}
+
+	if (direction == SHFT_UP) {
+		SlideCube(&hitbox, AXIS_Y, -amount);
+		if (!ChkCamColl()) {
+			SlideCube(&hitbox, AXIS_Y, amount);
+		}
+		else {
+			CG->CurLevel->cam.posy += amount;
+		}
+	}
 }
 
 //Collisions
 bool ChkCamColl() {
-	int i; cube hitbox; camera *cam = &CG->CurLevel->cam;
-	cube *temp;
-
-	hitbox.top.tpl = (vertex){ .x = cam->posx + cam->poswrldx + pWidth, .z = cam->poswrldz + cam->posz + pWidth, .y = cam->posy + pHead};
-	hitbox.top.tpr = (vertex){ .x = cam->posx + cam->poswrldx - pWidth, .z = cam->poswrldz + cam->posz + pWidth, .y = cam->posy + pHead};
-	hitbox.top.btl = (vertex){ .x = cam->posx + cam->poswrldx + pWidth, .z = cam->poswrldz + cam->posz - pWidth, .y = cam->posy + pHead};
-	hitbox.top.btr = (vertex){ .x = cam->posx + cam->poswrldx - pWidth, .z = cam->poswrldz + cam->posz - pWidth, .y = cam->posy + pHead};
-	hitbox.bt.tpl  = (vertex){ .x = cam->posx + cam->poswrldx + pWidth, .z = cam->poswrldz + cam->posz + pWidth, .y = cam->posy - pLegs};
+	int i; bool coll = true; camera *cam = &CG->CurLevel->cam;
+	cube *temp, hitbox2; double radius, tradius;
+	hitbox2 = hitbox;
+	radius = dabs(hitbox.top.tpl.x - hitbox.top.tpr.x) / 2.0;
 
 	for (i = 0; i < CG->CurLevel->objlst.i; i++) { //Main Iterator
 		if (CG->CurLevel->objlst.obj[i].type == OBJ_CUBE) {//For Cubes
 			temp = (cube *)CG->CurLevel->objlst.obj[i].obj;
+			tradius = dabs(temp->top.tpl.x - temp->top.tpr.x) / 2.0;
 			//Bound Checking (for small->big)
 			if (((temp->top.tpl.x > hitbox.top.tpl.x) && (temp->top.tpr.x < hitbox.top.tpl.x)) || //X Axis 1
 				((temp->top.tpr.x < hitbox.top.tpr.x) && (temp->top.tpl.x > hitbox.top.tpr.x))) { //X Axis 2
 				if (((temp->top.tpl.z > hitbox.top.tpl.z) && (temp->top.btl.z < hitbox.top.tpl.z)) ||  //Z Axis 1
 					((temp->top.btl.z < hitbox.top.btl.z) && (temp->top.tpl.z > hitbox.top.btl.z))) {  //Z Axis 2
-					if (((temp->bt.tpl.y < hitbox.top.tpl.y) && (temp->top.tpr.y > hitbox.top.tpl.y)) || //Y Axis 1
-						((temp->top.tpr.y > hitbox.bt.tpr.y) && (temp->bt.tpl.y < hitbox.bt.tpr.y))) {   //Y Axis 2
-						return false;
+					if (((temp->bt.tpl.y < hitbox.top.tpl.y) && (temp->top.tpl.y > hitbox.top.tpl.y)) || //Y Axis 1
+						((temp->top.tpl.y > hitbox.bt.tpl.y) && (temp->bt.tpl.y < hitbox.bt.tpl.y))) {   //Y Axis 2
+						coll = false;
 					}
 				}
 			}
@@ -479,11 +763,17 @@ bool ChkCamColl() {
 				((hitbox.top.tpr.x < temp->top.tpr.x) && (hitbox.top.tpr.x > temp->top.tpl.x))) { //X Axis 2
 				if (((hitbox.top.tpl.z > temp->top.tpl.z) && (hitbox.top.tpl.z < temp->top.btl.z)) ||  //Z Axis 1
 					((hitbox.top.btl.z < temp->top.btl.z) && (hitbox.top.btl.z > temp->top.tpl.z))) {  //Z Axis 2
-					if (((hitbox.top.tpl.y < temp->bt.tpl.y) && (hitbox.top.tpl.y > temp->top.tpr.y)) || //Y Axis 1
-						((hitbox.bt.tpr.y > temp->top.tpr.y) && (hitbox.bt.tpr.y < temp->bt.tpl.y))) {   //Y Axis 2
-						return false;
+					if (((hitbox.bt.tpl.y < temp->top.tpl.y) && (hitbox.top.tpl.y > temp->top.tpl.y)) || //Y Axis 1
+						((hitbox.bt.tpl.y < temp->bt.tpl.y) && (hitbox.top.tpl.y > temp->bt.tpl.y))) {   //Y Axis 2
+						coll = false;
 					}
 				}
+			}
+			if (coll == false) {
+				clearance.x = (hitbox.top.tpl.x - radius) - (temp->top.tpl.x - tradius);
+				clearance.y = (hitbox.top.tpl.y - radius) - (temp->top.tpl.y - tradius);
+				clearance.z = (hitbox.top.tpl.z - radius) - (temp->top.tpl.z - tradius);
+				return false;
 			}
 		}
 	}
@@ -491,40 +781,80 @@ bool ChkCamColl() {
 }
 
 //Updates
+void UpdateScreen(int axis, double amount) {
+	int i; text *temp;
+	for (i = 0; i < screen.i; i++) {
+		if (screen.obj[i].type == OBJ_TEXT) {
+			temp = (text *)screen.obj[i].obj;
+			if (axis == AXIS_X)
+				temp->pos.x += amount;
+			if (axis == AXIS_Y)
+				temp->pos.y += amount;
+			if (axis == AXIS_Z)
+				temp->pos.z += amount;
+			if (axis == ROT_LEFT || axis == ROT_RIGHT) {
+				temp->rot.y += amount;
+			}
+			if (axis == ROT_UP || axis == ROT_DOWN) {
+				temp->rot.x += amount;
+			}
+		}
+	}
+}
 void UpdateKeyStates() {
+	bounce = false;
 	//Move Camera
 	if (GetAsyncKeyState('W')) {
-		CG->CurLevel->cam.poswrldz += cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldx += sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_UP, 40);
+		MoveCam(SHFT_FORWARD, 0.0075f);
+		Bounce(DIR_UP, .4, 4);
+		bounce = true;
 	}
 	if (GetAsyncKeyState('S')) {
-		CG->CurLevel->cam.poswrldz -= cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldx -= sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_DOWN, 40);
+		MoveCam(SHFT_BACK, 0.0075f);
+		if (!bounce) {
+			Bounce(DIR_DOWN, .4, 4);
+			bounce = true;
+		}
 	}
 	if (GetAsyncKeyState('D')) {
-		CG->CurLevel->cam.poswrldx -= cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldz += sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_DOWN, 40);
+		MoveCam(SHFT_RT, 0.0075f);
+		if (!bounce) {
+			Bounce(DIR_UP, .4, 4);
+			bounce = true;
+		}
 	}
 	if (GetAsyncKeyState('A')) {
-		CG->CurLevel->cam.poswrldx += cos(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		CG->CurLevel->cam.poswrldz -= sin(CG->CurLevel->cam.rotwrldy*piover180) * 0.015f;
-		Bounce(DIR_UP, 40);
+		MoveCam(SHFT_LEFT, 0.0075f);
+		if (!bounce) {
+			Bounce(DIR_DOWN, .4, 4);
+			bounce = true;
+		}
 	}
 	if (GetAsyncKeyState(VK_SPACE)) {
-		CG->CurLevel->cam.phys.yacc += .5;
+		MoveCam(SHFT_UP, 0.0075f);
+		if (!bounce) {
+			Bounce(DIR_UP, .4, 4);
+			bounce = true;
+		}
+	}
+	if (GetAsyncKeyState(VK_SHIFT)) {
+		MoveCam(SHFT_DOWN, 0.0075f);
+		if (!bounce) {
+			Bounce(DIR_UP, .4, 4);
+			bounce = true;
+		}
 	}
 	//Mouse Movement
 	GetCursorPos(&global_pos);
 	if ((global_pos.x != global_x / 2) || (global_pos.y != global_y / 2)) {
 		if (global_pos.x > global_x / 2) {//Right?
 			CG->CurLevel->cam.rotwrldy += (global_x / 2 - global_pos.x) * sensitivity;
+			UpdateScreen(ROT_RIGHT, (global_x / 2 - global_pos.x) * sensitivity);
 			//heading -= .5;
 		}
 		if (global_pos.x < global_x / 2) {//Left?
 			CG->CurLevel->cam.rotwrldy += (global_x / 2 - global_pos.x) * sensitivity;
+			UpdateScreen(ROT_LEFT, (global_x / 2 - global_pos.x) * sensitivity);
 			//heading += .5;
 		}
 
@@ -538,6 +868,7 @@ void UpdateKeyStates() {
 			if (angle + angled < 1) {
 				ly = sin(angle + angled);
 				angle += angled;
+				UpdateScreen(ROT_UP, (global_y / 2 - global_pos.y) * sensitivity);
 			}
 		}
 		if (global_pos.y > global_y / 2) {//Down?
@@ -545,6 +876,7 @@ void UpdateKeyStates() {
 			if (angle + angled > -1) {
 				ly = sin(angle + angled);
 				angle += angled;
+				UpdateScreen(ROT_DOWN, (global_y / 2 - global_pos.y) * sensitivity);
 			}
 		}
 
@@ -617,14 +949,17 @@ int DrawGLScene(GLvoid)									// Here's Where We Do All The Drawing
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);	// Clear Screen And Depth Buffer
 	glLoadIdentity();									// Reset The Current Modelview Matrix
 	gluLookAt(CG->CurLevel->cam.posx, CG->CurLevel->cam.posy, CG->CurLevel->cam.posz, CG->CurLevel->cam.rotx, CG->CurLevel->cam.roty + ly, CG->CurLevel->cam.rotz, CG->CurLevel->cam.vecx, CG->CurLevel->cam.vecy, CG->CurLevel->cam.vecz);
-
 	glRotated(360 - CG->CurLevel->cam.rotwrldy, 0.0, 1.0, 0.0);
 	//glRotated(CG->CurLevel->cam.rotwrldx, 1.0, 0.0, 0.0);
 	if (GetAsyncKeyState('T'))
 		CG->CurLevel->cam.rotwrldx += .5;
 
+	if (GetAsyncKeyState('H')) {
+		t1.rot.x += .1;
+	}
+
 	glTranslated(CG->CurLevel->cam.poswrldx, CG->CurLevel->cam.poswrldy, CG->CurLevel->cam.poswrldz);
-	glTranslated(1.5, 0.0, -7.0);
+	glTranslated(globtranx, 0.0, globtranz);
 
 	DrawLevel(*CG->CurLevel);
 	//ShowFullTexFade(CG->global_tex, &global_alpha, global_decrease);
@@ -645,6 +980,8 @@ int InitGL(GLvoid)										// All Setup For OpenGL Goes Here
 	glDepthFunc(GL_LEQUAL);								// The Type Of Depth Testing To Do
 	glHint(GL_PERSPECTIVE_CORRECTION_HINT, GL_NICEST);	// Really Nice Perspective Calculations
 	//glBlendFunc(GL_SRC_ALPHA, GL_ONE);					// Set The Blending Function For Translucency
+
+	BuildFont();
 
 	//glEnable(GL_BLEND);			// Turn Blending On
 	//glDisable(GL_DEPTH_TEST);	// Turn Depth Testing Off
@@ -962,6 +1299,7 @@ int WINAPI WinMain(HINSTANCE	hInstance,			// Instance
 	//Setup Game
 	CG = &g1;
 	SetupLevel1();
+	SetupHitBox();
 
 	ShowCursor(0);
 	SetCursorPos(global_x / 2, global_y / 2);
@@ -970,7 +1308,7 @@ int WINAPI WinMain(HINSTANCE	hInstance,			// Instance
 	fullscreen = false;
 
 	// Create Our OpenGL Window
-	if (!CreateGLWindow(L"2d Game", global_x, global_y, 16, fullscreen))
+	if (!CreateGLWindow(L"3d Game", global_x, global_y, 16, fullscreen))
 	{
 		return 0;									// Quit If Window Was Not Created
 	}

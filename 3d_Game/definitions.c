@@ -38,7 +38,11 @@
 #define OBJ_CUBE 1
 #define OBJ_PYRAMID 2
 #define OBJ_SQ 3
+#define OBJ_TEXT 4
 
+#define AXIS_X 1
+#define AXIS_Y 2
+#define AXIS_Z 3
 
 //Basic Structs
 typedef struct vertex {
@@ -81,6 +85,7 @@ typedef struct camera {
 typedef struct obj {
 	void *obj;
 	unsigned int type;
+	bool screen;
 } obj;           
 typedef struct color {
 	double r;
@@ -112,6 +117,11 @@ typedef struct cube  {
 	square right;
 	physics phys;
 } cube;
+typedef struct text {
+	char *str;
+	vertex pos;
+	vertex rot;
+} text;
 typedef struct objlist {
 	obj *obj;
 	unsigned int bytes;
@@ -135,3 +145,12 @@ color red, green, blue, white, gray;
 
 //Declarations
 void ShiftCube(cube *input, int direction, double amount);
+bool ChkCamColl();
+void SlideSq(square *input, int axis, double amount);
+void UpdateScreen(int axis, double amount);
+
+//Vars
+GLuint	base;				// Base Display List For The Font Set
+GLfloat	cnt1;				// 1st Counter Used To Move Text & For Coloring
+GLfloat	cnt2;				// 2nd Counter Used To Move Text & For Coloring
+GLYPHMETRICSFLOAT gmf[256];	// Storage For Information About Our Outline Font Characters
